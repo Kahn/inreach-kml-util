@@ -9,6 +9,9 @@ verify_ssl = true
 pykml = "*"
 pprint = "*"
 lxml = "*"
+skyfield = "*"
+latlon = "*"
+python-dateutil = "*"
 
 [requires]
 python_version = "2.7"
