@@ -11,7 +11,7 @@ from dateutil import tz
 import sys
 
 def inreach_time_to_dt(utc_time):
-    # 2/15/2019 11:10:30 PM
+    # in 2/15/2019 11:10:30 PM
     tzutc = tz.gettz('UTC')
     dt = datetime.strptime(str(utc_time), '%m/%d/%Y %I:%M:%S %p')
     dt = dt.replace(tzinfo=tzutc)
@@ -21,49 +21,34 @@ def inreach_dec_to_deg(lat, lon):
     # in -33.385798,150.282861
     # out '40.8939 N'
     latlon_pos = LatLon(lat, lon)
-    # lat, lon = latlon_pos.to_string('d% %m% %S% %H')
     lat, lon = latlon_pos.to_string('D% %H')
-    # print(lat, lon)
     return lat, lon
 
-def iridium_positions(utc_dt, lat_deg, lon_deg, elevation_m):
-    elevation = str(elevation_m).split(" ")
-    ts = load.timescale()
-    t = ts.utc(utc_dt)
-    # team_position = Topos(lat_deg, lon_deg)
-    team_position = Topos('42.3583 N', '71.0603 W', elevation_m=float(elevation[0]))
-    print(team_position)
+def get_iridium_passes(utc_dt, lat_deg, lon_deg, elevation_m):
+
     stations_url = 'http://celestrak.com/NORAD/elements/iridium-NEXT.txt'
     satellites = load.tle(stations_url)
-    print(satellites['IRIDIUM 161'])
-
-
-    # for satellite in satellites:
-        # sat = satellite.
-    sat_pos_geocentric = satellites['IRIDIUM 161'].at(t)
-    print(sat_pos_geocentric.position.km)
-    subpoint = sat_pos_geocentric.subpoint()
-    print('Latitude:', subpoint.latitude)
-    print('Longitude:', subpoint.longitude)
-    print('Elevation (m):', int(subpoint.elevation.m))
-    bluffton = Topos('40.8939 N', '83.8917 W')
-    difference = sat_pos_geocentric - bluffton
-    print(difference)
-
-    difference = sat_pos_geocentric - team_position
-    print(difference)
-    topocentric = difference.at(t)
-    print(topocentric.position.km)
-    alt, az, distance = topocentric.altaz()
-
-    if alt.degrees > 0:
-        print('The satellite {} is above the horizon').format(satellites['IRIDIUM 161'])
-
-    print(alt)
-    print(az)
-    print(distance.km)
-    
-
+    passes = []
+    for sat in satellites:
+        if "IRIDIUM" in str(sat):
+            elevation = str(elevation_m).split(" ")
+            ts = load.timescale()
+            t = ts.utc(utc_dt)
+            geocentric = satellites[sat].at(t)
+            subpoint = geocentric.subpoint()
+            team = Topos(lat_deg, lon_deg, elevation_m=float(elevation[0]))
+            difference = satellites[sat] - team
+            topocentric = difference.at(t)
+            alt, az, distance = topocentric.altaz()
+            if alt.degrees > 9:
+                pass_details = {
+                    "sat": sat,
+                    "alt_deg": alt.degrees,
+                    "az_deg": az.degrees,
+                    "dist_km": distance.km
+                }
+                passes.append(pass_details)
+    return passes
 
 
 with open('explore.kml', 'rt') as f:
@@ -99,24 +84,30 @@ for unit in kml.Document.Folder:
         try:
             event = placemark.ExtendedData.Data[16].value
             if event == "Text message received.":
-                if placemark.ExtendedData.Data[2].value != '':
-                    time = placemark.ExtendedData.Data[2].value
-                else:
-                    time = 'unknown datetime'
-                placemark.name = unit.name + ' ' + time
-                team_folder.name = unit.name
-                team_folder.append(placemark)
+                placemark.name = unit.name
                 # skyfield
                 utc_dt = inreach_time_to_dt(placemark.ExtendedData.Data[2].value)
                 lat_deg, lon_deg = inreach_dec_to_deg(placemark.ExtendedData.Data[8].value, placemark.ExtendedData.Data[9].value)
-                # print(utc_dt, lat_dms, lon_dms)
-                iridium_positions(utc_dt, lat_deg, lon_deg, placemark.ExtendedData.Data[10].value)
+                passes = get_iridium_passes(utc_dt, lat_deg, lon_deg, placemark.ExtendedData.Data[10].value)
+                placemark.description = "  ## Event details ##  \n"
+                placemark.description += "Time: {}\n".format(placemark.ExtendedData.Data[2].value)    
+                placemark.description += "Inreach text: {}\n".format(placemark.ExtendedData.Data[15].value)
+                placemark.description += "\n"
+                placemark.description += "  ## Orbital Details ##  \n"
+                for p in passes:
+                    placemark.description += "Satellite: {}\n".format(p['sat'])
+                    placemark.description += "Elevation Angle degrees: {}\n".format(p['alt_deg'])
+                    placemark.description += "Compass Heading degrees: {}\n".format(p['az_deg'])
+                    placemark.description += "Path Distance Km: {}\n".format(p['dist_km'])
+
+                team_folder.name = unit.name
+                team_folder.append(placemark)
+
                 csv_row = [ placemark.ExtendedData.Data[0].value, placemark.ExtendedData.Data[1].value, placemark.ExtendedData.Data[2].value, placemark.ExtendedData.Data[3].value, placemark.ExtendedData.Data[4].value, placemark.ExtendedData.Data[5].value, placemark.ExtendedData.Data[6].value, placemark.ExtendedData.Data[7].value, placemark.ExtendedData.Data[8].value, placemark.ExtendedData.Data[9].value, placemark.ExtendedData.Data[10].value, placemark.ExtendedData.Data[11].value, placemark.ExtendedData.Data[15].value, placemark.ExtendedData.Data[16].value
                 ]
                 out_csv.append(csv_row)
         except AttributeError as e:
             print(e)
-            sys.exit(1)
             pass
         except Exception as e:
             print(e)
